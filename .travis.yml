@@ -1,36 +1,105 @@
+# the setup I'm using requires the use of `sudo`
+# to run some commands as super-user, as such I
+# require it at the top of the configuration file
+sudo: required
+
+# this tells Travis to set up the box with some common tools
+# used in PHP projects; while one can start with a "blank"
+# box I find this convenient
 language: php
 
+# no email notifications for me; this is personal choice
+notifications:
+  email: false
+
+# I want my project to be tested with the following PHP versions
 php:
-  - '5.4'
-  - '5.6'
   - '7.0'
-  - hhvm # on Trusty only
+  - '7.1'
   - nightly
+
+matrix:
+  fast_finish: true
+
+  # if the tests fail on the "nightly" version of PHP that's fine
+  allow_failures:
+    - php: nightly
+
+# I will need to use a database in my tests so, in place of installing and
+# setting up a MySQL server I simply require it; this will make the `mysql`
+# binary available
+services:
+  - mysql
+
+cache:
+  apt: true
+  directories:
+    - vendor
+    - $HOME/.composer/cache/files
+
+addons:
+
+  # instead of adding a line, in the `before_install` or `install`
+  # sections to install packages using `apt-get install...` I simply
+  # delegate the task to Travis
+  apt:
+    packages:
+
+    # I will need PHP in its FPM version, MySQL PHP extensions and Nginx
+    # itself
+      - php5-fpm
+      - php5-mysql
+      - nginx
+
+  # if I need to resolve pretty URLs to the local machine in place
+  # of adding a line that tries to modify the `/etc/hosts` file I can
+  # specify all the modifications I'd like to do here.
+  # there is no `*.site.localhost` option so I need to add an entry for
+  # each subdomain I want to use
+  hosts:
+    - site.localhost
+    - test1.site.localhost
+
+env:
+  # here I define some environment variables I will be able to use
+  # in scripts and in the PHP application itself
+  # e.g `$SITE_FOLDER` will return `/tmp/site` in a bash script
+  # while `$siteFolder = getenv('SITE_FOLDER');` will return the same
+  # value in a PHP script
+  global:
+    - SITE_URL="http://site.localhost"
+    - SITE_DOMAIN="site.localhost"
+    - DB_NAME="test"
+
+before_install:
+  # create the databases that will be used by the site using `mysql` binary
+  # user is `root`, password is empty and host is `localhost`
+  - mysql -e "create database IF NOT EXISTS $DB_NAME;" -uroot
+
+install:
+  # install Composer dependencies
+  - composer install --prefer-dist
+
+  # copy the Nginx configuration file for the site among the available ones from 
+  # the `build` folder; the content of the Nginx configuration file I'm using is
+  # specific to WordPress (see below) so use whatever you need to use.
+  # Given the current environment configuration it will be copied to `/etc/nginx/sites-available/site.localhost`
+  - sudo cp build/travis-nginx-conf /etc/nginx/sites-available/$SITE_DOMAIN
+
+  # using sed replace the placeholder text in the Nginx configuration file to use the
+  # correct site folder path and domain
+  - sudo sed -e "s?%TRAVIS_BUILD_DIR%?$TRAVIS_BUILD_DIR?g" --in-place /etc/nginx/sites-available/$SITE_DOMAIN
+  - sudo sed -e "s?%SITE_DOMAIN%?$SITE_DOMAIN?g" --in-place /etc/nginx/sites-available/$SITE_DOMAIN
+
+  # enable the site by creating a symbolic link in the `sites-enabled` folder
+  - sudo ln -s /etc/nginx/sites-available/$SITE_DOMAIN /etc/nginx/sites-enabled/
 
 before_script:
 
-install:  
-  - php vendor/vendors.php
+  # restart Nginx and PHP-FPM services to make sure the new site is loaded
+  - sudo service php5-fpm restart
+  - sudo service nginx restart
 
-# Run test script commands.
-# Default is specific to project language.
-# All commands must exit with code 0 on success. Anything else is considered failure.
 script:
-    # Search for PHP syntax errors.
-    - find -L . -name '*.php' -print0 | xargs -0 -n 1 -P 4 php -l
-    # Run the theme through JSHint.
-    - if [[ "$SNIFF" == "1" ]]; then jshint .; fi
-    # Run the theme through JavaScript Code Style checker.
-    - if [[ "$SNIFF" == "1" ]]; then jscs .; fi
-    # WordPress Coding Standards.
-    # @link https://github.com/WordPress-Coding-Standards/WordPress-Coding-Standards
-    # @link https://pear.php.net/package/PHP_CodeSniffer/
-    # Uses a custom ruleset based on WordPress. This ruleset is automatically
-    # picked up by PHPCS as it's named `phpcs.xml(.dist)`.
-    - if [[ "$SNIFF" == "1" ]]; then $PHPCS_DIR/scripts/phpcs; fi
-    - phpunit --configuration $DB.phpunit.xml
-
-# Receive notifications for build results.
-# @link https://docs.travis-ci.com/user/notifications/#Email-notifications
-notifications:
-    email: false
+  # finally run the tests...
+  - curl http://site.localhost
