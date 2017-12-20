@@ -9,8 +9,7 @@ php:
 
 before_script:
 
-install:
-  - ./bin/ci/install_dependencies.sh
+install:  
   - php vendor/vendors.php
 
 # Run test script commands.
