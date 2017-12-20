@@ -1,105 +1,176 @@
-# the setup I'm using requires the use of `sudo`
-# to run some commands as super-user, as such I
-# require it at the top of the configuration file
-sudo: required
+# Travis CI (MIT License) configuration file for the solitude WordPress theme.
+# @link https://travis-ci.org/
 
-# this tells Travis to set up the box with some common tools
-# used in PHP projects; while one can start with a "blank"
-# box I find this convenient
+# For use with the solitude WordPress theme.
+# @link https://github.com/shubham9411/solitude
+
+# Ditch sudo and use containers.
+# @link http://docs.travis-ci.com/user/migrating-from-legacy/#Why-migrate-to-container-based-infrastructure%3F
+# @link http://docs.travis-ci.com/user/workers/container-based-infrastructure/#Routing-your-build-to-container-based-infrastructure
+sudo: false
+
+# Declare project language.
+# @link http://about.travis-ci.org/docs/user/languages/php/
 language: php
 
-# no email notifications for me; this is personal choice
-notifications:
-  email: false
-
-# I want my project to be tested with the following PHP versions
-php:
-  - '7.0'
-  - '7.1'
-  - nightly
-
+# Declare versions of PHP to use. Use one decimal max.
+# @link http://docs.travis-ci.com/user/build-configuration/
 matrix:
-  fast_finish: true
+    fast_finish: true
 
-  # if the tests fail on the "nightly" version of PHP that's fine
-  allow_failures:
-    - php: nightly
+    include:
+        # Current $required_php_version for WordPress: 5.2.4
+        # aliased to 5.2.17
+        - php: '5.2'
+        # aliased to a recent 5.6.x version
+        - php: '5.6'
+          env: SNIFF=1
+        # aliased to a recent 7.0.x version
+        - php: '7.0'
+        # aliased to a recent 7.1.x version
+        - php: '7.1'
+        # aliased to a recent hhvm version
+        - php: 'hhvm'
 
-# I will need to use a database in my tests so, in place of installing and
-# setting up a MySQL server I simply require it; this will make the `mysql`
-# binary available
-services:
-  - mysql
+    allow_failures:
+        - php: 'hhvm'
 
-cache:
-  apt: true
-  directories:
-    - vendor
-    - $HOME/.composer/cache/files
+# Use this to prepare the system to install prerequisites or dependencies.
+# e.g. sudo apt-get update.
+# Failures in this section will result in build status 'errored'.
+# before_install:
 
-addons:
-
-  # instead of adding a line, in the `before_install` or `install`
-  # sections to install packages using `apt-get install...` I simply
-  # delegate the task to Travis
-  apt:
-    packages:
-
-    # I will need PHP in its FPM version, MySQL PHP extensions and Nginx
-    # itself
-      - php5-fpm
-      - php5-mysql
-      - nginx
-
-  # if I need to resolve pretty URLs to the local machine in place
-  # of adding a line that tries to modify the `/etc/hosts` file I can
-  # specify all the modifications I'd like to do here.
-  # there is no `*.site.localhost` option so I need to add an entry for
-  # each subdomain I want to use
-  hosts:
-    - site.localhost
-    - test1.site.localhost
-
-env:
-  # here I define some environment variables I will be able to use
-  # in scripts and in the PHP application itself
-  # e.g `$SITE_FOLDER` will return `/tmp/site` in a bash script
-  # while `$siteFolder = getenv('SITE_FOLDER');` will return the same
-  # value in a PHP script
-  global:
-    - SITE_URL="http://site.localhost"
-    - SITE_DOMAIN="site.localhost"
-    - DB_NAME="test"
-
-before_install:
-  # create the databases that will be used by the site using `mysql` binary
-  # user is `root`, password is empty and host is `localhost`
-  - mysql -e "create database IF NOT EXISTS $DB_NAME;" -uroot
-
-install:
-  # install Composer dependencies
-  - composer install --prefer-dist
-
-  # copy the Nginx configuration file for the site among the available ones from 
-  # the `build` folder; the content of the Nginx configuration file I'm using is
-  # specific to WordPress (see below) so use whatever you need to use.
-  # Given the current environment configuration it will be copied to `/etc/nginx/sites-available/site.localhost`
-  - sudo cp build/travis-nginx-conf /etc/nginx/sites-available/$SITE_DOMAIN
-
-  # using sed replace the placeholder text in the Nginx configuration file to use the
-  # correct site folder path and domain
-  - sudo sed -e "s?%TRAVIS_BUILD_DIR%?$TRAVIS_BUILD_DIR?g" --in-place /etc/nginx/sites-available/$SITE_DOMAIN
-  - sudo sed -e "s?%SITE_DOMAIN%?$SITE_DOMAIN?g" --in-place /etc/nginx/sites-available/$SITE_DOMAIN
-
-  # enable the site by creating a symbolic link in the `sites-enabled` folder
-  - sudo ln -s /etc/nginx/sites-available/$SITE_DOMAIN /etc/nginx/sites-enabled/
-
+# Use this to prepare your build for testing.
+# e.g. copy database configurations, environment variables, etc.
+# Failures in this section will result in build status 'errored'.
 before_script:
+    - export PHPCS_DIR=/tmp/phpcs
+    - export SNIFFS_DIR=/tmp/sniffs
+    # Install CodeSniffer for WordPress Coding Standards checks.
+    - if [[ "$SNIFF" == "1" ]]; then git clone -b master --depth 1 https://github.com/squizlabs/PHP_CodeSniffer.git $PHPCS_DIR; fi
+    # Install WordPress Coding Standards.
+    - if [[ "$SNIFF" == "1" ]]; then git clone -b master --depth 1 https://github.com/WordPress-Coding-Standards/WordPress-Coding-Standards.git $SNIFFS_DIR; fi
+    # Install PHP Compatibility sniffs.
+    - if [[ "$SNIFF" == "1" ]]; then git clone -b master --depth 1 https://github.com/wimg/PHPCompatibility.git $SNIFFS_DIR/PHPCompatibility; fi
+    # Set install path for PHPCS sniffs.
+    # @link https://github.com/squizlabs/PHP_CodeSniffer/blob/4237c2fc98cc838730b76ee9cee316f99286a2a7/CodeSniffer.php#L1941
+    - if [[ "$SNIFF" == "1" ]]; then $PHPCS_DIR/scripts/phpcs --config-set installed_paths $SNIFFS_DIR; fi
+    # After CodeSniffer install you should refresh your path.
+    - if [[ "$SNIFF" == "1" ]]; then phpenv rehash; fi
+    # Install JSCS: JavaScript Code Style checker.
+    # @link http://jscs.info/
+    - if [[ "$SNIFF" == "1" ]]; then npm install -g jscs; fi
+    # Install JSHint, a JavaScript Code Quality Tool.
+    # @link http://jshint.com/docs/
+    - if [[ "$SNIFF" == "1" ]]; then npm install -g jshint; fi
+    # Pull in the WP Core jshint rules.
+    - if [[ "$SNIFF" == "1" ]]; then wget https://develop.svn.wordpress.org/trunk/.jshintrc; fi
 
-  # restart Nginx and PHP-FPM services to make sure the new site is loaded
-  - sudo service php5-fpm restart
-  - sudo service nginx restart
-
+# Run test script commands.
+# Default is specific to project language.
+# All commands must exit with code 0 on success. Anything else is considered failure.
 script:
-  # finally run the tests...
-  - curl http://site.localhost
+    # Search for PHP syntax errors.
+    - find -L . -name '*.php' -print0 | xargs -0 -n 1 -P 4 php -l
+    # Run the theme through JSHint.
+    - if [[ "$SNIFF" == "1" ]]; then jshint .; fi
+    # Run the theme through JavaScript Code Style checker.
+    - if [[ "$SNIFF" == "1" ]]; then jscs .; fi
+    # WordPress Coding Standards.
+    # @link https://github.com/WordPress-Coding-Standards/WordPress-Coding-Standards
+    # @link http://pear.php.net/package/PHP_CodeSniffer/
+    # -p flag: Show progress of the run.
+    # -s flag: Show sniff codes in all reports.
+    # -v flag: Print verbose output.
+    # -n flag: Do not print warnings. (shortcut for --warning-severity=0)
+    # --standard: Use WordPress as the standard.
+    # --extensions: Only sniff PHP files.
+    - if [[ "$SNIFF" == "1" ]]; then $PHPCS_DIR/scripts/phpcs -p -s -v -n . --standard=./codesniffer.ruleset.xml --extensions=php; fi
+# Travis CI (MIT License) configuration file for the solitude WordPress theme.
+# @link https://travis-ci.org/
+
+# For use with the solitude WordPress theme.
+# @link https://github.com/shubham9411/solitude
+
+# Ditch sudo and use containers.
+# @link http://docs.travis-ci.com/user/migrating-from-legacy/#Why-migrate-to-container-based-infrastructure%3F
+# @link http://docs.travis-ci.com/user/workers/container-based-infrastructure/#Routing-your-build-to-container-based-infrastructure
+sudo: false
+
+# Declare project language.
+# @link http://about.travis-ci.org/docs/user/languages/php/
+language: php
+
+# Declare versions of PHP to use. Use one decimal max.
+# @link http://docs.travis-ci.com/user/build-configuration/
+matrix:
+    fast_finish: true
+
+    include:
+        # Current $required_php_version for WordPress: 5.2.4
+        # aliased to 5.2.17
+        - php: '5.2'
+        # aliased to a recent 5.6.x version
+        - php: '5.6'
+          env: SNIFF=1
+        # aliased to a recent 7.0.x version
+        - php: '7.0'
+        # aliased to a recent 7.1.x version
+        - php: '7.1'
+        # aliased to a recent hhvm version
+        - php: 'hhvm'
+
+    allow_failures:
+        - php: 'hhvm'
+
+# Use this to prepare the system to install prerequisites or dependencies.
+# e.g. sudo apt-get update.
+# Failures in this section will result in build status 'errored'.
+# before_install:
+
+# Use this to prepare your build for testing.
+# e.g. copy database configurations, environment variables, etc.
+# Failures in this section will result in build status 'errored'.
+before_script:
+    - export PHPCS_DIR=/tmp/phpcs
+    - export SNIFFS_DIR=/tmp/sniffs
+    # Install CodeSniffer for WordPress Coding Standards checks.
+    - if [[ "$SNIFF" == "1" ]]; then git clone -b master --depth 1 https://github.com/squizlabs/PHP_CodeSniffer.git $PHPCS_DIR; fi
+    # Install WordPress Coding Standards.
+    - if [[ "$SNIFF" == "1" ]]; then git clone -b master --depth 1 https://github.com/WordPress-Coding-Standards/WordPress-Coding-Standards.git $SNIFFS_DIR; fi
+    # Install PHP Compatibility sniffs.
+    - if [[ "$SNIFF" == "1" ]]; then git clone -b master --depth 1 https://github.com/wimg/PHPCompatibility.git $SNIFFS_DIR/PHPCompatibility; fi
+    # Set install path for PHPCS sniffs.
+    # @link https://github.com/squizlabs/PHP_CodeSniffer/blob/4237c2fc98cc838730b76ee9cee316f99286a2a7/CodeSniffer.php#L1941
+    - if [[ "$SNIFF" == "1" ]]; then $PHPCS_DIR/scripts/phpcs --config-set installed_paths $SNIFFS_DIR; fi
+    # After CodeSniffer install you should refresh your path.
+    - if [[ "$SNIFF" == "1" ]]; then phpenv rehash; fi
+    # Install JSCS: JavaScript Code Style checker.
+    # @link http://jscs.info/
+    - if [[ "$SNIFF" == "1" ]]; then npm install -g jscs; fi
+    # Install JSHint, a JavaScript Code Quality Tool.
+    # @link http://jshint.com/docs/
+    - if [[ "$SNIFF" == "1" ]]; then npm install -g jshint; fi
+    # Pull in the WP Core jshint rules.
+    - if [[ "$SNIFF" == "1" ]]; then wget https://develop.svn.wordpress.org/trunk/.jshintrc; fi
+
+# Run test script commands.
+# Default is specific to project language.
+# All commands must exit with code 0 on success. Anything else is considered failure.
+script:
+    # Search for PHP syntax errors.
+    - find -L . -name '*.php' -print0 | xargs -0 -n 1 -P 4 php -l
+    # Run the theme through JSHint.
+    - if [[ "$SNIFF" == "1" ]]; then jshint .; fi
+    # Run the theme through JavaScript Code Style checker.
+    - if [[ "$SNIFF" == "1" ]]; then jscs .; fi
+    # WordPress Coding Standards.
+    # @link https://github.com/WordPress-Coding-Standards/WordPress-Coding-Standards
+    # @link http://pear.php.net/package/PHP_CodeSniffer/
+    # -p flag: Show progress of the run.
+    # -s flag: Show sniff codes in all reports.
+    # -v flag: Print verbose output.
+    # -n flag: Do not print warnings. (shortcut for --warning-severity=0)
+    # --standard: Use WordPress as the standard.
+    # --extensions: Only sniff PHP files.
+    - if [[ "$SNIFF" == "1" ]]; then $PHPCS_DIR/scripts/phpcs -p -s -v -n . --standard=./codesniffer.ruleset.xml --extensions=php; fi
