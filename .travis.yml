@@ -50,7 +50,7 @@ before_script:
     - cp wp-tests-config-sample.php wp-tests-config.php
     - sed -i "s/db_atomsample/wordpress_test/" wp-tests-config.php
     - sed -i "s/paping/root/" wp-tests-config.php
-    - sed -i "s/""//" wp-tests-config.php
+    - sed -i "s/SjisNz%Wq@3ImGq!pZ//" wp-tests-config.php
     # Create WordPress database.
     - mysql -e 'CREATE DATABASE db_atomsample;' -uroot
     # Install CodeSniffer for WordPress Coding Standards checks.
